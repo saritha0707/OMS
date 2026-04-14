@@ -1,4 +1,5 @@
 server:
+  port: 8081
   servlet:
     context-path: /oms
 
@@ -10,7 +11,7 @@ spring:
       add-mappings: false
 
   datasource:
-    url: jdbc:mysql://localhost:3306/ordermanagementsystem
+    url: jdbc:mysql://localhost:3306/oms
     username: root
     password: mysql070711
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -47,6 +48,8 @@ spring:
 # Custom Kafka Topics Configuration
 kafka:
   topics:
+    inventory_check_request: inventory_check_request
+    inventory_check_response: inventory_check_response
     order-events: order-events
     inventory-events: inventory-events
 

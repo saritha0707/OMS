@@ -53,6 +53,7 @@ public class GlobalExceptionHandler {
         );
         return new ResponseEntity<>(error, HttpStatus.METHOD_NOT_ALLOWED);
     }
+
     @ExceptionHandler(org.springframework.web.servlet.NoHandlerFoundException.class)
     public ResponseEntity<?> handleNotFound(NoHandlerFoundException ex) {
         String message = "API end point not found";
@@ -65,6 +66,7 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
     //  Handle Validation Errors (@Valid DTO)
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException ex) {
 
@@ -141,19 +143,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
 
-    //  Handle Invalid Order State
-    @ExceptionHandler(InvalidOrderStateException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidOrderState(InvalidOrderStateException ex) {
-
-        ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(),
-                "Bad Request",
-                ex.getMessage()
-        );
-
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
-
     @ExceptionHandler(CustomerOrGuestValidationException.class)
     public ResponseEntity<ErrorResponse> handleCustomValidation(CustomerOrGuestValidationException ex) {
 
@@ -189,26 +178,5 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(error,HttpStatus.BAD_REQUEST);
     }
-    @ExceptionHandler(InsufficientStockException.class)
-    public ResponseEntity<ErrorResponse> handleInsufficientStock(InsufficientStockException ex) {
 
-        ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(),
-                "Bad Request",
-                ex.getMessage()
-        );
-
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
-    @ExceptionHandler(InvalidInventoryException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidQuantity(InvalidInventoryException ex) {
-
-        ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(),
-                "Bad Request",
-                ex.getMessage()
-        );
-
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
-    }
 }

@@ -1,9 +1,5 @@
 package com.oms.service;
-import com.oms.dto.ProductRequestDTO;
-import com.oms.dto.ProductResponseDTO;
-import com.oms.entity.Product;
 import com.oms.exception.ResourceNotFoundException;
-import com.oms.mapper.ProductMapper;
 import com.oms.repository.ProductRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

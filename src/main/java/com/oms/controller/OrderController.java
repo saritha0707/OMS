@@ -8,6 +8,7 @@ import com.oms.service.*;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,10 +22,11 @@ public class OrderController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public OrderResponseDTO createOrder(@Valid @RequestBody OrderRequestDTO dto) {
+//    public OrderResponseDTO createOrder(@Valid @RequestBody OrderRequestDTO dto) {
+    public ResponseEntity createOrder(@Valid @RequestBody OrderRequestDTO dto) {
         return orderService.createOrder(dto);
     }
-
+/*
     @GetMapping
     public List<OrderResponseDTO> getAllOrders() {
         return orderService.getAllOrders();
@@ -39,5 +41,5 @@ public class OrderController {
     public OrderStatusUpdateResponseDTO updateOrderStatus(
             @Valid @RequestBody OrderStatusUpdateRequestDTO request) {
         return orderService.updateOrderStatus(request.getOrderId(),request.getOrder_status());
-    }
+    }*/
 }

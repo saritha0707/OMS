@@ -1,0 +1,20 @@
+package com.oms.event;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.experimental.SuperBuilder;
+
+@Data
+@SuperBuilder
+@NoArgsConstructor
+@AllArgsConstructor
+public class OrderItemEventResponse {
+
+     Integer productId;
+     String productName;
+     Integer warehouseId;
+     String warehouseName;
+     Integer price;
+     String status; // AVAILABLE , INSUFFICIENT_STOCK
+}

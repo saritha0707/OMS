@@ -56,8 +56,10 @@ class OrderControllerTest {
         response.setMessage("Order status updated successfully");
 
         // ✅ Mock service behavior
+/*
         when(orderService.updateOrderStatus(1, OrderStatus.PROCESSED.name()))
                 .thenReturn(response);
+*/
 
         // ✅ Act + Assert
         mockMvc.perform(put("/orders/status/update")

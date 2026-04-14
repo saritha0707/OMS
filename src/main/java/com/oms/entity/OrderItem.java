@@ -1,7 +1,4 @@
 package com.oms.entity;
-import com.oms.entity.Orders;
-import com.oms.entity.Product;
-import com.oms.entity.Warehouse;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
@@ -42,12 +39,11 @@ public class OrderItem {
 
     @ManyToOne
     @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+    private int product;
 
     //  ADD THIS (based on ER diagram)
     @ManyToOne
     @JoinColumn(name = "warehouse_id", nullable = false)
-    private Warehouse warehouse;
-
+    private int warehouse;
 
 }

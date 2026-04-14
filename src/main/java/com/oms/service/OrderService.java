@@ -1,22 +1,25 @@
 package com.oms.service;
 
-import com.oms.dto.InventoryResponseDTO;
 import com.oms.dto.OrderRequestDTO;
 import com.oms.dto.OrderResponseDTO;
 import com.oms.dto.OrderStatusUpdateResponseDTO;
 import com.oms.entity.*;
 import com.oms.enums.OrderStatus;
 import com.oms.enums.PaymentMethod;
+import com.oms.event.InventoryCheckEvent;
 import com.oms.event.OrderCreatedEvent;
 import com.oms.exception.*;
+import com.oms.mapper.InventoryCheckEventMapper;
 import com.oms.mapper.OrderMapper;
 import com.oms.repository.*;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -35,10 +38,6 @@ public class OrderService {
     @Autowired
     OrderStatusHistoryRepository statusHistoryRepository;
     @Autowired
-    private ProductRepository productRepository;
-    @Autowired
-    private WarehouseRepository warehouseRepository;
-    @Autowired
     private CustomerRepository customerRepository;
     @Autowired
     private OrderMapper orderMapper;
@@ -46,76 +45,57 @@ public class OrderService {
     private KafkaProducerService producerService;
 
     @Autowired
-    private InventoryService inventoryService;
-
-    @Autowired
     PaymentRepository paymentRepository;
 
-    @Transactional
-    public OrderResponseDTO createOrder(OrderRequestDTO dto) {
+    @Autowired
+    Orders order;
 
-        if (dto.getPaymentMethod() == PaymentMethod.REFUND) {
-            throw new InvalidPaymentMethodException(
-                    "Invalid value for paymentMethod. Allowed values: CASH_ON_DELIVERY, ONLINE"
-            );
-        }
-        log.info("Creating order with {} items", dto.getItems().size());
+    @Transactional
+    public ResponseEntity<> createOrder(OrderRequestDTO dto) {
+        // public OrderResponseDTO createOrder(OrderRequestDTO dto) {
+        try
+        {
 
         //  FIX 1: Strong validation
         validateCustomerOrGuest(dto);
+            if (dto.getPaymentMethod() == PaymentMethod.REFUND) {
+                throw new InvalidPaymentMethodException(
+                        "Invalid value for paymentMethod. Allowed values: CASH_ON_DELIVERY, ONLINE"
+                );
+            }
+            log.info("Creating order with {} items", dto.getItems().size());
 
-        // ✅ NEW FIX: Validate inventory availability BEFORE creating order
+            // Save details in DB with status as created
+            //Orders order = new Orders();
+            order.setStatus(OrderStatus.CREATED.name());
+
+            //  FIX 2: Customer vs Guest handling
+            if (dto.getCustomerId() != null) {
+                Customer customer = customerRepository.findById(dto.getCustomerId()).orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+                order.setCustomer(customer);
+            } else {
+                order.setGuestName(dto.getGuestName());
+                order.setGuestEmail(dto.getGuestEmail());
+                order.setGuestPhone(dto.getGuestPhone());
+            }
+
+            List<OrderItem> orderItems = dto.getItems().stream().map(itemDTO -> {
+                OrderItem item = new OrderItem();
+                item.setProduct(itemDTO.getProductId());
+                item.setWarehouse(itemDTO.getWarehouseId());
+                item.setQuantity(itemDTO.getQuantity());
+                item.setOrder(order);
+                return item;
+            }).collect(Collectors.toList());
+            order.setOrderItems(orderItems);
+       //Send message to kafka topic inventory-availability topic
+        sendKafkaMessage(orderItems);
+
+        // wait for entry in topic and get updated global variables  to use in this method
+       /* // ✅ NEW FIX: Validate inventory availability BEFORE creating order
         validateInventoryAvailability(dto);
 
-        Orders order = new Orders();
-        order.setStatus(OrderStatus.CREATED.name());
 
-        //  FIX 2: Customer vs Guest handling
-        if (dto.getCustomerId() != null) {
-            Customer customer = customerRepository.findById(dto.getCustomerId()).orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
-            order.setCustomer(customer);
-        } else {
-            order.setGuestName(dto.getGuestName());
-            order.setGuestEmail(dto.getGuestEmail());
-            order.setGuestPhone(dto.getGuestPhone());
-        }
-
-        //  FIX 3: Map items with warehouse (ER aligned)
-        List<OrderItem> orderItems = dto.getItems().stream().map(itemDTO -> {
-
-            List<InventoryResponseDTO> response = inventoryService.getProductAvailability(itemDTO.getProductId());
-            Integer quantity = response.stream()
-                    .filter(i -> i.getWarehouseId() == itemDTO.getWarehouseId())
-                    .map(InventoryResponseDTO::getQuantity)
-                    .findFirst()
-                    .orElse(0);   // default if not found
-            //get details from inventory service and then call below lines
-            if(!inventoryService.isProductAvailable(itemDTO.getProductId(), itemDTO.getWarehouseId(),itemDTO.getQuantity())) {
-                throw new InsufficientStockException(itemDTO.getProductId(),
-                        quantity,
-                        itemDTO.getQuantity());
-            }
-          //orElseThrow(() -> new ResourceNotFoundException("Product not found: " + itemDTO.getProductId()))
-            Product product = productRepository.findById(itemDTO.getProductId()).orElseThrow(() -> new ResourceNotFoundException("Product not found: " + itemDTO.getProductId()));
-
-            Warehouse warehouse = warehouseRepository.findById(itemDTO.getWarehouseId()).orElseThrow(() -> new ResourceNotFoundException("Warehouse not found: " + itemDTO.getWarehouseId()));
-
-            OrderItem item = new OrderItem();
-            item.setProduct(product);
-            item.setWarehouse(warehouse);
-            item.setQuantity(itemDTO.getQuantity());
-            item.setPrice(product.getPrice());
-            item.setInventoryStatus("Available");
-            item.setAvailableQuantity(quantity);
-            item.setOrder(order);
-             //We have already invoked this method during Kafka processing, so it has been commented out here to prevent multiple reductions of the product.
-            //below method is trying to reduce inventory for items
-            //inventoryService.reduceInventory(itemDTO.getProductId(),itemDTO.getWarehouseId(),itemDTO.getQuantity());
-            return item;
-
-        }).collect(Collectors.toList());
-
-        order.setOrderItems(orderItems);
 
         //  FIX 4: Calculate total safely
         BigDecimal totalAmount = orderItems.stream().map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -127,8 +107,8 @@ public class OrderService {
         payment.setAmount(totalAmount);
         payment.setOrder(order);
         payment.setPaymentMethod(dto.getPaymentMethod());
-        if(dto.getPaymentMethod() == PaymentMethod.ONLINE)
-        payment.setPaymentStatus("PAID");
+        if (dto.getPaymentMethod() == PaymentMethod.ONLINE)
+            payment.setPaymentStatus("PAID");
         else if (dto.getPaymentMethod() == PaymentMethod.CASH_ON_DELIVERY)
             payment.setPaymentStatus("PENDING");
         order.setPayments(List.of(payment));
@@ -147,14 +127,38 @@ public class OrderService {
 
         //  FIX 6: Kafka AFTER DB commit (basic safe approach)
         //Update Inventory
-        sendKafkaEventSafely(savedOrder);
+       // sendKafkaEventSafely(savedOrder);
+*/
+      //  OrderResponseDTO response = orderMapper.mapToResponseDTO(savedOrder);
+      // return new ResponseEntity<>(response, HttpStatus.CREATED).getBody();
+            return ResponseEntity.status(HttpStatus.CREATED).build();
+        }
+        catch (InvalidPaymentMethodException exception) {
+            throw new InvalidPaymentMethodException(exception.getMessage());
+        }
 
-        OrderResponseDTO response = orderMapper.mapToResponseDTO(savedOrder);
-        return new ResponseEntity<>(response, HttpStatus.CREATED).getBody();
+        // ✅ Handle DB exceptions
+        catch (DataIntegrityViolationException ex) {
+            throw new OrderProcessingException("Database error while creating order");
+        }
+
+        // ✅ Catch unexpected errors
+        catch (Exception ex) {
+            log.error("Unexpected error while creating order", ex);
+            throw new OrderProcessingException("Unable to create order. Please try again");
+        }
     }
 
+    //Send kafka event to kafka topic
+    private void sendKafkaMessage(List<OrderItem>  itemDTO)
+    {
+        InventoryCheckEvent event = InventoryCheckEventMapper.buildInventoryCheckEvent(itemDTO);
+        producerService.publishInventoryCheckEvent(event);
+    }
+
+
     //  FIX 7: Extracted Kafka logic (clean + reusable)
-    private void sendKafkaEventSafely(Orders order) {
+    /*private void sendKafkaEventSafely(Orders order) {
         try {
             OrderCreatedEvent event = buildOrderCreatedEvent(order);
             producerService.publishOrderCreatedEvent(event);
@@ -163,12 +167,12 @@ public class OrderService {
             log.error("Kafka publishing failed for orderId={}", order.getOrderId(), e);
             // 🔥 Future: Outbox pattern / retry queue
         }
-    }
+    }*/
 
     /**
      * Builds OrderCreatedEvent from saved order entity
      */
-    private OrderCreatedEvent buildOrderCreatedEvent(Orders order) {
+   /* private OrderCreatedEvent buildOrderCreatedEvent(Orders order) {
         // Build item events
         List<OrderCreatedEvent.OrderItemEvent> itemEvents = order.getOrderItems().stream()
                 .map(item -> OrderCreatedEvent.OrderItemEvent.builder()
@@ -197,7 +201,7 @@ public class OrderService {
                 .items(itemEvents)
                 .build();
     }
-
+*/
     //  FIX 8: Strong validation logic
     private void validateCustomerOrGuest(OrderRequestDTO dto) {
 
@@ -211,7 +215,7 @@ public class OrderService {
     // ✅ NEW: Validate inventory availability before order creation
     private void validateInventoryAvailability(OrderRequestDTO dto) {
         if (dto.getItems() == null || dto.getItems().isEmpty()) {
-            throw new IllegalArgumentException("Order must have at least one item");
+            throw n/*ew IllegalArgumentException("Order must have at least one item");
         }
 
         for (var itemDTO : dto.getItems()) {
@@ -248,22 +252,22 @@ public class OrderService {
                     itemDTO.getProductId(), itemDTO.getWarehouseId(),
                     inventory.getQuantity(), itemDTO.getQuantity());
         }
-    }
+    }*/
 
     // Get All Orders
-    public List<OrderResponseDTO> getAllOrders() {
+   /* public List<OrderResponseDTO> getAllOrders() {
         return orderRepository.findAll().stream().map(orderMapper::mapToResponseDTO).collect(Collectors.toList());
-    }
+    }*/
 
     // Get Order By ID
-    public OrderResponseDTO getOrderById(int id) {
+   /* public OrderResponseDTO getOrderById(int id) {
         Orders order = orderRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + id));
 
         return orderMapper.mapToResponseDTO(order);
     }
-
+*/
     // Cancel Order
-    public OrderResponseDTO cancelOrder(int orderId) {
+  /*  public OrderResponseDTO cancelOrder(int orderId) {
 
         Orders order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
@@ -300,9 +304,9 @@ public class OrderService {
 
         }
         return orderMapper.mapToResponseDTO(updatedOrder);
-    }
+    }*/
 
-    public OrderStatusUpdateResponseDTO updateOrderStatus(int orderId, String status) {
+    /*public OrderStatusUpdateResponseDTO updateOrderStatus(int orderId, String status) {
 
         Orders order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -454,6 +458,6 @@ public class OrderService {
             default:
                 return false;
         }
-    }
+    }*/
 }
 

@@ -26,7 +26,7 @@ public class OrderMapper {
 
         List<OrderItemResponseDTO> items = order.getOrderItems().stream().map(item -> {
             OrderItemResponseDTO itemDTO = new OrderItemResponseDTO();
-            itemDTO.setProductId(item.getProduct().getProductId());
+            itemDTO.setProductId(item.getProduct());
             itemDTO.setProductName(item.getProduct().getProductName());
             itemDTO.setQuantity(item.getQuantity());
             itemDTO.setPrice(item.getPrice());
