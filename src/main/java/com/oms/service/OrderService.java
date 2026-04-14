@@ -51,7 +51,7 @@ public class OrderService {
     Orders order;
 
     @Transactional
-    public ResponseEntity<> createOrder(OrderRequestDTO dto) {
+    public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
         // public OrderResponseDTO createOrder(OrderRequestDTO dto) {
         try
         {
@@ -91,19 +91,14 @@ public class OrderService {
        //Send message to kafka topic inventory-availability topic
         sendKafkaMessage(orderItems);
 
-        // wait for entry in topic and get updated global variables  to use in this method
-       /* // ✅ NEW FIX: Validate inventory availability BEFORE creating order
-        validateInventoryAvailability(dto);
-
-
 
         //  FIX 4: Calculate total safely
-        BigDecimal totalAmount = orderItems.stream().map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))).reduce(BigDecimal.ZERO, BigDecimal::add);
+        //BigDecimal totalAmount = orderItems.stream().map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        order.setTotalAmount(totalAmount);
+      //  order.setTotalAmount(totalAmount);
 
         //update Payment Table
-        Payment payment = new Payment();
+        /*Payment payment = new Payment();
         payment.setAmount(totalAmount);
         payment.setOrder(order);
         payment.setPaymentMethod(dto.getPaymentMethod());
@@ -112,7 +107,7 @@ public class OrderService {
         else if (dto.getPaymentMethod() == PaymentMethod.CASH_ON_DELIVERY)
             payment.setPaymentStatus("PENDING");
         order.setPayments(List.of(payment));
-
+         */
         //  FIX 5: Save FIRST (important for consistency)
         Orders savedOrder = orderRepository.save(order);
 
@@ -128,7 +123,7 @@ public class OrderService {
         //  FIX 6: Kafka AFTER DB commit (basic safe approach)
         //Update Inventory
        // sendKafkaEventSafely(savedOrder);
-*/
+
       //  OrderResponseDTO response = orderMapper.mapToResponseDTO(savedOrder);
       // return new ResponseEntity<>(response, HttpStatus.CREATED).getBody();
             return ResponseEntity.status(HttpStatus.CREATED).build();
@@ -213,9 +208,9 @@ public class OrderService {
     }
 
     // ✅ NEW: Validate inventory availability before order creation
-    private void validateInventoryAvailability(OrderRequestDTO dto) {
+   /* private void validateInventoryAvailability(OrderRequestDTO dto) {
         if (dto.getItems() == null || dto.getItems().isEmpty()) {
-            throw n/*ew IllegalArgumentException("Order must have at least one item");
+            throw new IllegalArgumentException("Order must have at least one item");
         }
 
         for (var itemDTO : dto.getItems()) {
@@ -255,9 +250,9 @@ public class OrderService {
     }*/
 
     // Get All Orders
-   /* public List<OrderResponseDTO> getAllOrders() {
+   public List<OrderResponseDTO> getAllOrders() {
         return orderRepository.findAll().stream().map(orderMapper::mapToResponseDTO).collect(Collectors.toList());
-    }*/
+    }
 
     // Get Order By ID
    /* public OrderResponseDTO getOrderById(int id) {
