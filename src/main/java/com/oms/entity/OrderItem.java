@@ -37,13 +37,11 @@ public class OrderItem {
     @JoinColumn(name = "order_id", nullable = false)
     private Orders order;
 
-    @ManyToOne
-    @JoinColumn(name = "product_id", nullable = false)
+    @Column(nullable = false)
     private int product;
 
     //  ADD THIS (based on ER diagram)
-    @ManyToOne
-    @JoinColumn(name = "warehouse_id", nullable = false)
+    @Column(nullable = false)
     private int warehouse;
 
 }

@@ -47,15 +47,12 @@ public class OrderService {
     @Autowired
     PaymentRepository paymentRepository;
 
-    @Autowired
-    Orders order;
-
-    @Transactional
+   @Transactional
     public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
         // public OrderResponseDTO createOrder(OrderRequestDTO dto) {
         try
         {
-
+            Orders order = new Orders();
         //  FIX 1: Strong validation
         validateCustomerOrGuest(dto);
             if (dto.getPaymentMethod() == PaymentMethod.REFUND) {

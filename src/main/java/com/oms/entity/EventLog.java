@@ -26,6 +26,7 @@ public class EventLog {
     @Column(nullable = false)
     private String eventType;  // ORDER_CREATED, INVENTORY_UPDATED
 
+    @Column(nullable = true)
     private Long orderId;
 
     @Column(nullable = false)

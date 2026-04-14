@@ -15,7 +15,6 @@ import java.time.LocalDateTime;
 public abstract class BaseEvent {
 
     protected String eventId;
-    protected Long orderId;
     protected String status;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING)

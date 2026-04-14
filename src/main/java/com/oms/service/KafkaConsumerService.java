@@ -8,6 +8,7 @@ import com.oms.event.OrderCreatedEvent;
 import com.oms.event.OrderItemEvent;
 import com.oms.exception.InsufficientStockException;
 import com.oms.repository.EventLogRepository;
+import com.oms.util.KafkaUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
@@ -29,13 +30,15 @@ public class KafkaConsumerService {
     private final OrderService orderService;
     private final EventLogRepository eventLogRepository;
     private final ObjectMapper objectMapper;
+    private final KafkaUtil kafkaUtil;
 
     public KafkaConsumerService(OrderService orderService,
                                 EventLogRepository eventLogRepository,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,KafkaUtil kafkaUtil) {
         this.orderService = orderService;
         this.eventLogRepository = eventLogRepository;
         this.objectMapper = objectMapper;
+        this.kafkaUtil = kafkaUtil;
     }
 
     //Received message from inventoryCheckResponse and service call service class method
@@ -72,7 +75,7 @@ public class KafkaConsumerService {
             }
 
             // ✅ Create event log
-            EventLog eventLog = createEventLog(event, "PROCESSING");
+            EventLog eventLog = kafkaUtil.createEventLog(event, "PROCESSING");
 
             // ✅ Track per-item results
             List<OrderItemEvent> itemResults = new ArrayList<>();
@@ -80,7 +83,7 @@ public class KafkaConsumerService {
             boolean hasSuccesses = false;
 
             // ✅ Process items
-            for (OrderItemEvent item : event) {
+          /*  for (OrderItemEvent item : event) {
 
                 if (item.getProductId() == null || item.getWarehouseId() == null) {
                     log.error("Invalid item: productId or warehouseId is null");
@@ -149,7 +152,7 @@ public class KafkaConsumerService {
                             .status("INSUFFICIENT_STOCK")
                             .build());
                 }
-            }
+            }*/
 
             // ✅ Determine overall status based on results
             String overallStatus = "SUCCESS";
@@ -174,7 +177,7 @@ public class KafkaConsumerService {
 
             log.error("Kafka processing failed: {}", e.getMessage(), e);
 
-            markEventAsFailed(event.getEventId(), e.getMessage());
+            kafkaUtil.markEventAsFailed(event.getEventId(), e.getMessage());
 
             throw new RuntimeException("Kafka processing failed", e);
         }
@@ -455,48 +458,17 @@ public class KafkaConsumerService {
         }
     }*/
 
-    // ✅ Helper methods
 
-    private boolean isEventAlreadyProcessed(String eventId) {
-        return eventLogRepository.existsByEventId(eventId);
-    }
-
-    private EventLog createEventLog(BaseEvent event, String status) {
-        try {
-            EventLog eventLog = new EventLog();
-            eventLog.setEventId(event.getEventId());
-            eventLog.setEventType(event.getEventType());
-            eventLog.setOrderId(event.getOrderId());
-            eventLog.setStatus(status);
-            eventLog.setEventPayload(objectMapper.writeValueAsString(event));
-            eventLog.setCreatedAt(LocalDateTime.now());
-
-            return eventLogRepository.save(eventLog);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create event log", e);
-        }
-    }
-
-    private void markEventAsFailed(String eventId, String errorMessage) {
-        eventLogRepository.findByEventId(eventId).ifPresent(eventLog -> {
-            eventLog.setStatus("FAILED");
-            eventLog.setErrorMessage(errorMessage);
-            eventLog.setProcessedAt(LocalDateTime.now());
-            eventLogRepository.save(eventLog);
-        });
-    }
 
     private boolean isInvalidOrDuplicate(BaseEvent event, Acknowledgment acknowledgment) {
 
-        if (event.getEventId() == null || event.getEventId().isBlank()
-                || event.getOrderId() == null) {
-
+        if (event.getEventId() == null || event.getEventId().isBlank()) {
             log.error("Invalid event received");
             acknowledgment.acknowledge();
             return true;
         }
 
-        if (isEventAlreadyProcessed(event.getEventId())) {
+        if (kafkaUtil.isEventAlreadyProcessed(event.getEventId())) {
             log.warn("Duplicate event: {}", event.getEventId());
             acknowledgment.acknowledge();
             return true;

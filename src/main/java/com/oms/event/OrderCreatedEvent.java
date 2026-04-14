@@ -15,6 +15,7 @@ import java.util.List;
 @AllArgsConstructor
 public class OrderCreatedEvent extends BaseEvent {
 
+    private Long orderId;
     private Integer customerId;
     private String customerName;
     private String guestName;

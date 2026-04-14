@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 @Getter
 @Setter
 @ConfigurationProperties(prefix = "kafka.topics")
-@ComponentScan
 public class KafkaTopicsConfig {
   public String inventoryCheckRequest;
   public String inventoryCheckResponse;

@@ -48,8 +48,8 @@ spring:
 # Custom Kafka Topics Configuration
 kafka:
   topics:
-    inventory_check_request: inventory_check_request
-    inventory_check_response: inventory_check_response
+    inventory-check-request: inventory-check-request
+    inventory-check-response: inventory-check-response
     order-events: order-events
     inventory-events: inventory-events
 
