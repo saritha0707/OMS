@@ -230,6 +230,10 @@ public class OrderService {
         ResponseEntity responseEntity = ResponseEntity.status(status).body(response);
         return responseEntity;
         }
+        catch(ResourceNotFoundException ex)
+        {
+            throw ex;
+        }
         catch (InsufficientStockException ex) {
             throw ex;
         }
