@@ -9,6 +9,8 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -84,6 +86,21 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
+
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<Map<String, Object>> handleInsufficientStockException(InsufficientStockException ex) {
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", "FAILED"); // or FAILED based on your logic
+        response.put("items", ex.getItems());
+
+        ResponseEntity<Map<String, Object>> body = ResponseEntity
+                .status(HttpStatus.CONFLICT) // 409
+                .body(response);
+        return body;
+    }
+
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
@@ -178,5 +195,14 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(error,HttpStatus.BAD_REQUEST);
     }
+    @ExceptionHandler(OrderProcessingException.class)
+    public ResponseEntity<ErrorResponse> handleOrderProcessingException(OrderProcessingException ex) {
 
+        ErrorResponse error = new ErrorResponse(
+                LocalDateTime.now(),
+                "Bad Request",
+                ex.getMessage()
+        );
+        return new ResponseEntity<>(error,HttpStatus.BAD_REQUEST);
+    }
 }

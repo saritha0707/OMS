@@ -1,23 +1,6 @@
 package com.OrderManagementSystem.service;
 
-import com.oms.dto.*;
-import com.oms.entity.*;
-import com.oms.enums.PaymentMethod;
-import com.oms.exception.*;
-import com.oms.mapper.OrderMapper;
-import com.oms.repository.*;
-import com.oms.service.KafkaProducerService;
-import com.oms.service.OrderService;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-
-import java.math.BigDecimal;
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 @ExtendWith(org.mockito.junit.jupiter.MockitoExtension.class)
 public class OrderServiceTest {

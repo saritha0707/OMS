@@ -1,22 +1,41 @@
 package com.oms.exception;
 
-/**
- * Exception thrown when inventory stock is insufficient for order fulfillment.
- * This is a business exception and should NOT be retried.
- */
+import com.oms.dto.InsufficientItem;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
 public class InsufficientStockException extends RuntimeException {
 
-    private final int availableQuantity;
+    private List<InsufficientItem> items;
 
-    public InsufficientStockException(int productId, int availableQuantity, int requestedQuantity) {
+    // ✅ Single item constructor
+    public InsufficientStockException(int productId,int warehouseId, int availableQty, int requestedQty) {
         super("Insufficient stock for productId=" + productId +
-                ", available=" + availableQuantity +
-                ", requested=" + requestedQuantity);
+                        ", warehouse="+ warehouseId +
+                ", available=" + availableQty +
+                ", requested=" + requestedQty);
 
-        this.availableQuantity = availableQuantity;
+        this.items = List.of(new InsufficientItem(productId,warehouseId, requestedQty, availableQty));
     }
 
-    public int getAvailableQuantity() {
-        return availableQuantity;
+    // ✅ Multiple items constructor
+    public InsufficientStockException(List<InsufficientItem> items) {
+        super(buildMessage(items));
+        this.items = items;
+    }
+
+    public List<InsufficientItem> getItems() {
+        return items;
+    }
+
+    // 🔥 Helper to create single combined message
+    private static String buildMessage(List<InsufficientItem> items) {
+        return items.stream()
+                .map(item -> "productId=" + item.getProductId() +
+                        " (available=" + item.getAvailableQuantity() +
+                        ", requested=" + item.getRequestedQuantity() + ")")
+                .collect(Collectors.joining("; ",
+                        "Insufficient stock for items: ", ""));
     }
 }

@@ -27,7 +27,7 @@ public class Orders {
     private LocalDateTime orderDate = LocalDateTime.now();
 
     @Column(nullable = false)
-    private String status; // CREATED, PAID, FAILED
+    private String status; // CREATED,PARTIAL,FAILED
 
     @Column(nullable = false)
     private BigDecimal totalAmount;

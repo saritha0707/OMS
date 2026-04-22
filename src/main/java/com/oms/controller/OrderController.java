@@ -21,12 +21,10 @@ public class OrderController {
     private OrderService orderService;
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-//    public OrderResponseDTO createOrder(@Valid @RequestBody OrderRequestDTO dto) {
-    public ResponseEntity createOrder(@Valid @RequestBody OrderRequestDTO dto) {
+    public ResponseEntity<OrderResponseDTO> createOrder(@Valid @RequestBody OrderRequestDTO dto) {
         return orderService.createOrder(dto);
     }
-/*
+
     @GetMapping
     public List<OrderResponseDTO> getAllOrders() {
         return orderService.getAllOrders();
@@ -37,6 +35,8 @@ public class OrderController {
         return orderService.getOrderById(id);
     }
 
+//Inorder to update this we need to use WebClient
+    /*
     @PutMapping("/status/update")
     public OrderStatusUpdateResponseDTO updateOrderStatus(
             @Valid @RequestBody OrderStatusUpdateRequestDTO request) {

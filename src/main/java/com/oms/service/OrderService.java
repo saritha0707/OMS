@@ -1,14 +1,19 @@
 package com.oms.service;
 
+import com.oms.dto.InsufficientItem;
+import com.oms.dto.OrderItemResponseDTO;
 import com.oms.dto.OrderRequestDTO;
 import com.oms.dto.OrderResponseDTO;
-import com.oms.dto.OrderStatusUpdateResponseDTO;
 import com.oms.entity.*;
 import com.oms.enums.OrderStatus;
 import com.oms.enums.PaymentMethod;
 import com.oms.event.InventoryCheckEvent;
+import com.oms.event.InventoryCheckResponseEvent;
 import com.oms.event.OrderCreatedEvent;
+import com.oms.event.OrderItemEventResponse;
 import com.oms.exception.*;
+import com.oms.kafka.KafkaProducerService;
+import com.oms.kafka.KafkaResponseTracker;
 import com.oms.mapper.InventoryCheckEventMapper;
 import com.oms.mapper.OrderMapper;
 import com.oms.repository.*;
@@ -19,14 +24,16 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.bind.annotation.RequestBody;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 @Service
@@ -43,13 +50,14 @@ public class OrderService {
     private OrderMapper orderMapper;
     @Autowired
     private KafkaProducerService producerService;
+    @Autowired
+    private KafkaResponseTracker kafkaResponseTracker;
 
     @Autowired
     PaymentRepository paymentRepository;
 
    @Transactional
-    public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
-        // public OrderResponseDTO createOrder(OrderRequestDTO dto) {
+      public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
         try
         {
             Orders order = new Orders();
@@ -76,26 +84,26 @@ public class OrderService {
                 order.setGuestPhone(dto.getGuestPhone());
             }
 
+            BigDecimal totalAmount = BigDecimal.ZERO;
+
             List<OrderItem> orderItems = dto.getItems().stream().map(itemDTO -> {
                 OrderItem item = new OrderItem();
                 item.setProduct(itemDTO.getProductId());
                 item.setWarehouse(itemDTO.getWarehouseId());
+                item.setPrice(itemDTO.getPrice());
                 item.setQuantity(itemDTO.getQuantity());
                 item.setOrder(order);
                 return item;
             }).collect(Collectors.toList());
             order.setOrderItems(orderItems);
-       //Send message to kafka topic inventory-availability topic
-        sendKafkaMessage(orderItems);
-
 
         //  FIX 4: Calculate total safely
-        //BigDecimal totalAmount = orderItems.stream().map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))).reduce(BigDecimal.ZERO, BigDecimal::add);
+        totalAmount = orderItems.stream().map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-      //  order.setTotalAmount(totalAmount);
+        order.setTotalAmount(totalAmount);
 
         //update Payment Table
-        /*Payment payment = new Payment();
+        Payment payment = new Payment();
         payment.setAmount(totalAmount);
         payment.setOrder(order);
         payment.setPaymentMethod(dto.getPaymentMethod());
@@ -104,36 +112,138 @@ public class OrderService {
         else if (dto.getPaymentMethod() == PaymentMethod.CASH_ON_DELIVERY)
             payment.setPaymentStatus("PENDING");
         order.setPayments(List.of(payment));
-         */
-        //  FIX 5: Save FIRST (important for consistency)
+
+        //  FIX 5: Save FIRST (important for consistency) - Initial Status - Created
         Orders savedOrder = orderRepository.save(order);
+        updateOrderStatusHistory(savedOrder);
 
-        //Update OrderStatusHistory Table
-        OrdersStatusHistory statusHistory = new OrdersStatusHistory();
-        statusHistory.setOrder(savedOrder);
-        statusHistory.setStatus(savedOrder.getStatus());
-        statusHistory.setChangedBy("USER");
-        OrdersStatusHistory savedstatusHistory = statusHistoryRepository.save(statusHistory);
+      //Read kafka message and get details of all items
+      String eventId = UUID.randomUUID().toString();
+      //Register future
+      CompletableFuture<InventoryCheckResponseEvent> future = kafkaResponseTracker.register(eventId);
+      //Send message to kafka topic inventory-availability topic
+      sendKafkaMessageToInventory(orderItems, eventId);
 
-        log.info("Order saved successfully with ID: {}", savedOrder.getOrderId());
+      //Update Status in DB
+       order.setStatus(OrderStatus.PENDING.name());
+       //Update Status of order as Pending
+      // savedOrder = orderRepository.save(order);
+       updateOrderStatusHistory(savedOrder);
 
-        //  FIX 6: Kafka AFTER DB commit (basic safe approach)
-        //Update Inventory
-       // sendKafkaEventSafely(savedOrder);
+// Wait for response
+            InventoryCheckResponseEvent inventoryResponse = future.get(10, TimeUnit.SECONDS);
+// ✅ Step 1: Update order items based on inventory
+            List<OrderItem> finalItems = savedOrder.getOrderItems().stream()
+                    .map(item -> {
 
-      //  OrderResponseDTO response = orderMapper.mapToResponseDTO(savedOrder);
-      // return new ResponseEntity<>(response, HttpStatus.CREATED).getBody();
-            return ResponseEntity.status(HttpStatus.CREATED).build();
+                        OrderItemEventResponse inv = inventoryResponse.getOrderItemCheckResponse()
+                                .stream()
+                                .filter(res ->
+                                        res.getProductId().equals(item.getProduct()) &&
+                                                res.getWarehouseId().equals(item.getWarehouse()))
+                                .findFirst()
+                                .orElse(null);
+
+                        if (inv == null) return null;
+
+                        Integer available = inv.getAvailableCount();
+
+                        // ❌ remove item if no stock
+                        if (available == null || available == 0) {
+                            log.warn("Removing product {} (warehouse {}) due to no stock",
+                                    item.getProduct(), item.getWarehouse());
+                            return null;
+                        }
+
+                        // ✅ always use available quantity (full or partial)
+                        if(item.getQuantity() > available)
+                        item.setQuantity(available);
+
+                        return item;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            // ❗ Edge case: no items left
+            if (finalItems.isEmpty()) {
+
+                List<InsufficientItem> items = savedOrder.getOrderItems().stream().map(
+                        item -> new InsufficientItem(
+                                item.getProduct(),
+                                item.getWarehouse(),
+                                item.getQuantity(),
+                                Optional.ofNullable(item.getAvailableQuantity()).orElse(0)
+                        )
+                ).collect(Collectors.toUnmodifiableList());
+
+                throw new InsufficientStockException(items);
+            }
+
+        // ✅ Step 2: update order with filtered items
+            savedOrder.setOrderItems(finalItems);
+
+        // ✅ Step 3: calculate total ONLY from final items
+            totalAmount = finalItems.stream()
+                    .map(item -> item.getPrice()
+                            .multiply(BigDecimal.valueOf(item.getQuantity())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            savedOrder.setTotalAmount(totalAmount);
+
+            // ✅ Step 4: update payment
+            payment = savedOrder.getPayments().get(0);
+            payment.setAmount(totalAmount);
+
+        // ✅ Step 5: prepare response DTO (optional)
+            List<OrderItemResponseDTO> itemResponseDTOList =
+                    inventoryResponse.getOrderItemCheckResponse().stream()
+                            .map(orderItem -> {
+                                OrderItemResponseDTO dto_updated = new OrderItemResponseDTO();
+
+                                dto_updated.setProductId(orderItem.getProductId());
+                                dto_updated.setProductName(orderItem.getProductName());
+                                dto_updated.setWarehouseId(orderItem.getWarehouseId());
+                                dto_updated.setPrice(orderItem.getPrice());
+                                //dto_updated.setInventoryStatus(orderItem.getStatus());
+                                if ("INSUFFICIENT_STOCK".equalsIgnoreCase(orderItem.getStatus())) {
+                                    dto_updated.setAvailableQuantity(orderItem.getAvailableCount());
+                                }
+
+                                return dto_updated;
+                            })
+                            .collect(Collectors.toList());
+            //set Http Status
+            HttpStatus status = evaluateStatus(inventoryResponse);
+
+            // ✅ Step 6: update order status
+            OrderStatus finalStatus = deriveOrderStatus(inventoryResponse);
+            savedOrder.setStatus(finalStatus.name());
+
+            updateOrderStatusHistory(savedOrder);
+
+            log.info("Order updated with ID: {}", savedOrder.getOrderId());
+
+        // ✅ Step 7: send ONLY valid items to Kafka
+            sendKafkaEventReduceInventory(savedOrder);
+
+        OrderResponseDTO response = orderMapper.mapToResponseDTO(savedOrder,itemResponseDTOList);
+        ResponseEntity responseEntity = ResponseEntity.status(status).body(response);
+        return responseEntity;
+        }
+        catch (InsufficientStockException ex) {
+            throw ex;
+        }
+        //kafka processing
+        catch(TimeoutException exception){
+            throw new RuntimeException("Inventory Service Timeout");
         }
         catch (InvalidPaymentMethodException exception) {
             throw new InvalidPaymentMethodException(exception.getMessage());
         }
-
         // ✅ Handle DB exceptions
         catch (DataIntegrityViolationException ex) {
             throw new OrderProcessingException("Database error while creating order");
         }
-
         // ✅ Catch unexpected errors
         catch (Exception ex) {
             log.error("Unexpected error while creating order", ex);
@@ -141,16 +251,61 @@ public class OrderService {
         }
     }
 
-    //Send kafka event to kafka topic
-    private void sendKafkaMessage(List<OrderItem>  itemDTO)
+    private HttpStatus evaluateStatus(InventoryCheckResponseEvent inventoryResponse) {
+       List<OrderItemEventResponse> response = inventoryResponse.getOrderItemCheckResponse();
+       long availableCount = response.stream()
+               .filter(i -> "AVAILABLE".equalsIgnoreCase(i.getStatus()))
+               .count();
+       int count = response.size();
+       if(availableCount == count)
+        {
+            return HttpStatus.CREATED;
+        }
+       else if(availableCount > 0)
+           return HttpStatus.PARTIAL_CONTENT;
+       else
+           return HttpStatus.CONFLICT;
+    }
+
+    private OrderStatus deriveOrderStatus(InventoryCheckResponseEvent response) {
+
+        boolean allAvailable = true;
+        boolean anyAvailable = false;
+
+        for (var item : response.getOrderItemCheckResponse()) {
+
+            if ("AVAILABLE".equalsIgnoreCase(item.getStatus())) {
+                anyAvailable = true;
+            } else {
+                allAvailable = false;
+            }
+        }
+
+        if (allAvailable) return OrderStatus.CONFIRMED;
+        if (anyAvailable) return OrderStatus.PARTIAL;
+        return OrderStatus.FAILED;
+    }
+
+    private void updateOrderStatusHistory(Orders savedOrder)
     {
-        InventoryCheckEvent event = InventoryCheckEventMapper.buildInventoryCheckEvent(itemDTO);
+        //Update OrderStatusHistory Table
+        OrdersStatusHistory statusHistory = new OrdersStatusHistory();
+        statusHistory.setOrder(savedOrder);
+        statusHistory.setStatus(savedOrder.getStatus());
+        statusHistory.setChangedBy("USER");
+        OrdersStatusHistory savedstatusHistory = statusHistoryRepository.save(statusHistory);
+    }
+
+    //Send kafka event to kafka topic
+    private void sendKafkaMessageToInventory(List<OrderItem>  itemDTO,String eventId)
+    {
+        InventoryCheckEvent event = InventoryCheckEventMapper.buildInventoryCheckEvent(itemDTO, eventId);
         producerService.publishInventoryCheckEvent(event);
     }
 
 
     //  FIX 7: Extracted Kafka logic (clean + reusable)
-    /*private void sendKafkaEventSafely(Orders order) {
+    private void sendKafkaEventReduceInventory(Orders order) {
         try {
             OrderCreatedEvent event = buildOrderCreatedEvent(order);
             producerService.publishOrderCreatedEvent(event);
@@ -159,22 +314,22 @@ public class OrderService {
             log.error("Kafka publishing failed for orderId={}", order.getOrderId(), e);
             // 🔥 Future: Outbox pattern / retry queue
         }
-    }*/
+    }
 
     /**
      * Builds OrderCreatedEvent from saved order entity
      */
-   /* private OrderCreatedEvent buildOrderCreatedEvent(Orders order) {
+    private OrderCreatedEvent buildOrderCreatedEvent(Orders order) {
+
+
         // Build item events
         List<OrderCreatedEvent.OrderItemEvent> itemEvents = order.getOrderItems().stream()
                 .map(item -> OrderCreatedEvent.OrderItemEvent.builder()
                         .orderItemId((long) item.getOrderItemId())
-                        .productId(item.getProduct().getProductId())
-                        .productName(item.getProduct().getProductName())
+                        .productId(item.getProduct())
                         .quantity(item.getQuantity())
                         .price(item.getPrice())
-                        .warehouseId(item.getWarehouse() != null ? item.getWarehouse().getWarehouseId() : null)
-                        .warehouseName(item.getWarehouse() != null ? item.getWarehouse().getWarehouseName() : null)
+                        .warehouseId(item.getWarehouse())
                         .build())
                 .collect(Collectors.toList());
 
@@ -193,7 +348,7 @@ public class OrderService {
                 .items(itemEvents)
                 .build();
     }
-*/
+
     //  FIX 8: Strong validation logic
     private void validateCustomerOrGuest(OrderRequestDTO dto) {
 
@@ -204,47 +359,6 @@ public class OrderService {
         }
     }
 
-    // ✅ NEW: Validate inventory availability before order creation
-   /* private void validateInventoryAvailability(OrderRequestDTO dto) {
-        if (dto.getItems() == null || dto.getItems().isEmpty()) {
-            throw new IllegalArgumentException("Order must have at least one item");
-        }
-
-        for (var itemDTO : dto.getItems()) {
-            // Validate product exists
-            Product product = productRepository.findById(itemDTO.getProductId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Product not found: " + itemDTO.getProductId()));
-
-            // Validate warehouse exists
-            Warehouse warehouse = warehouseRepository.findById(itemDTO.getWarehouseId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Warehouse not found: " + itemDTO.getWarehouseId()));
-
-            // ✅ NEW: Validate inventory exists and has sufficient quantity
-            var inventory = inventoryService.getInventoryOrThrow(itemDTO.getProductId(), itemDTO.getWarehouseId());
-
-            if (inventory.getQuantity() <= 0) {
-                throw new InsufficientStockException(
-                        itemDTO.getProductId(),
-                        inventory.getQuantity(),
-                        itemDTO.getQuantity()
-                );
-            }
-
-            if (inventory.getQuantity() < itemDTO.getQuantity()) {
-                throw new InsufficientStockException(
-                        itemDTO.getProductId(),
-                        inventory.getQuantity(),
-                        itemDTO.getQuantity()
-                );
-            }
-
-            log.info("Inventory validated: productId={}, warehouseId={}, available={}, requested={}",
-                    itemDTO.getProductId(), itemDTO.getWarehouseId(),
-                    inventory.getQuantity(), itemDTO.getQuantity());
-        }
-    }*/
 
     // Get All Orders
    public List<OrderResponseDTO> getAllOrders() {
@@ -252,13 +366,11 @@ public class OrderService {
     }
 
     // Get Order By ID
-   /* public OrderResponseDTO getOrderById(int id) {
+    public OrderResponseDTO getOrderById(int id) {
         Orders order = orderRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + id));
-
         return orderMapper.mapToResponseDTO(order);
     }
-*/
-    // Cancel Order
+    // Cancel Order - we need to use WebClient to call inventory service method
   /*  public OrderResponseDTO cancelOrder(int orderId) {
 
         Orders order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));

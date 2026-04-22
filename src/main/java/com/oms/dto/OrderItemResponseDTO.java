@@ -6,17 +6,15 @@ import lombok.Data;
 import java.math.BigDecimal;
 
 @Data
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class OrderItemResponseDTO {
 
     private int productId;
     private String productName;
-    private int quantity;
-    private BigDecimal price;
+    private int warehouseId;
+    private Integer quantity;
+    private Integer price;
 
-    //To exclude below fields when the value is null
-    // ✅ NEW: Inventory status fields
-   // @JsonInclude(JsonInclude.Include.NON_NULL)
-   // private String inventoryStatus;   // SUCCESS, INSUFFICIENT_STOCK, PENDING
-   // @JsonInclude(JsonInclude.Include.NON_NULL)
-   // private Integer availableQuantity;   // Available stock quantity
+    private String inventoryStatus; // AVAILABLE, INSUFFICIENT_STOCK
+    private Integer availableQuantity; // Avaialbe stock if status in INSUFFICIENT_STOCK
 }

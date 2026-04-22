@@ -10,7 +10,7 @@ import java.util.stream.Collectors;
 
 public class InventoryCheckEventMapper {
 
-    public static InventoryCheckEvent buildInventoryCheckEvent(List<OrderItem>  items)
+    public static InventoryCheckEvent buildInventoryCheckEvent(List<OrderItem>  items,String eventId)
     {
         List<OrderItemEvent> itemEvents = items.stream()
                 .map(item -> {
@@ -22,7 +22,7 @@ public class InventoryCheckEventMapper {
                 })
                 .collect(Collectors.toList());
         return InventoryCheckEvent.builder()
-                .eventId(UUID.randomUUID().toString())
+                .eventId(eventId)
                 .orderItems(itemEvents)
                 .build();
     }

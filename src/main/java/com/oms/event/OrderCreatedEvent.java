@@ -31,10 +31,8 @@ public class OrderCreatedEvent extends BaseEvent {
     public static class OrderItemEvent {
         private Long orderItemId;
         private Integer productId;
-        private String productName;
         private Integer quantity;
         private BigDecimal price;
-        private String warehouseName;
         private Integer warehouseId;
     }
 

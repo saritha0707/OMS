@@ -16,5 +16,7 @@ public class OrderItemEventResponse {
      Integer warehouseId;
      String warehouseName;
      Integer price;
+     Integer quantity;
+     Integer availableCount;
      String status; // AVAILABLE , INSUFFICIENT_STOCK
 }
