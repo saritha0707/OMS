@@ -5,6 +5,7 @@ import com.oms.dto.OrderItemResponseDTO;
 import com.oms.dto.OrderRequestDTO;
 import com.oms.dto.OrderResponseDTO;
 import com.oms.entity.*;
+import com.oms.enums.InventoryStatus;
 import com.oms.enums.OrderStatus;
 import com.oms.enums.PaymentMethod;
 import com.oms.event.InventoryCheckEvent;
@@ -57,7 +58,7 @@ public class OrderService {
     PaymentRepository paymentRepository;
 
    @Transactional
-      public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
+   public ResponseEntity<OrderResponseDTO> createOrder(OrderRequestDTO dto) {
         try
         {
             Orders order = new Orders();
@@ -132,7 +133,9 @@ public class OrderService {
 
 // Wait for response
             InventoryCheckResponseEvent inventoryResponse = future.get(10, TimeUnit.SECONDS);
-// ✅ Step 1: Update order items based on inventory
+            List<OrderItemEventResponse> responses =
+                    inventoryResponse.getOrderItemCheckResponse();
+            // ✅ Step 1: Update order items based on inventory
             List<OrderItem> finalItems = savedOrder.getOrderItems().stream()
                     .map(item -> {
 
@@ -144,8 +147,16 @@ public class OrderService {
                                 .findFirst()
                                 .orElse(null);
 
-                        if (inv == null) return null;
-
+                        if (inv == null)
+                            return null;
+                        else if("INVALID_PRODUCT".equalsIgnoreCase(inv.getStatus())){
+                            log.warn("INVALID PRODUCT" + inv.getProductId());
+                            return null;
+                        }
+                        else if("INVALID_WAREHOUSE".equalsIgnoreCase(inv.getStatus())) {
+                            log.warn("INVALID PRODUCT" + inv.getProductId());
+                            return null;
+                        }
                         Integer available = inv.getAvailableCount();
 
                         // ❌ remove item if no stock
@@ -166,7 +177,6 @@ public class OrderService {
 
             // ❗ Edge case: no items left
             if (finalItems.isEmpty()) {
-
                 List<InsufficientItem> items = savedOrder.getOrderItems().stream().map(
                         item -> new InsufficientItem(
                                 item.getProduct(),
@@ -196,19 +206,24 @@ public class OrderService {
 
         // ✅ Step 5: prepare response DTO (optional)
             List<OrderItemResponseDTO> itemResponseDTOList =
-                    inventoryResponse.getOrderItemCheckResponse().stream()
+                    responses.stream()
                             .map(orderItem -> {
                                 OrderItemResponseDTO dto_updated = new OrderItemResponseDTO();
-
                                 dto_updated.setProductId(orderItem.getProductId());
-                                dto_updated.setProductName(orderItem.getProductName());
                                 dto_updated.setWarehouseId(orderItem.getWarehouseId());
-                                dto_updated.setPrice(orderItem.getPrice());
-                                //dto_updated.setInventoryStatus(orderItem.getStatus());
-                                if ("INSUFFICIENT_STOCK".equalsIgnoreCase(orderItem.getStatus())) {
-                                    dto_updated.setAvailableQuantity(orderItem.getAvailableCount());
-                                }
-
+                               if("INSUFFICIENT_STOCK".equalsIgnoreCase(orderItem.getStatus())) {
+                                        dto_updated.setAvailableQuantity(orderItem.getAvailableCount());
+                               }
+                               else if("INVALID_PRODUCT".equalsIgnoreCase(orderItem.getStatus())){
+                                   dto_updated.setInventoryStatus("Product Id is invalid");
+                               }
+                               else if("INVALID_WAREHOUSE".equalsIgnoreCase(orderItem.getStatus())) {
+                               dto_updated.setInventoryStatus("Warehouse Id is invalid");
+                               }
+                               else if("AVAILABLE".equalsIgnoreCase(orderItem.getStatus())) {
+                                   dto_updated.setProductName(orderItem.getProductName());
+                                   dto_updated.setPrice(orderItem.getPrice());
+                               }
                                 return dto_updated;
                             })
                             .collect(Collectors.toList());
